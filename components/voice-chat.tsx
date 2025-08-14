@@ -47,20 +47,45 @@ export default function VoiceChat() {
   const wsRef = useRef<WebSocket | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
-  const animationFrameRef = useRef<number>()
-  const performanceTimerRef = useRef<number>()
+  const animationFrameRef = useRef<number | undefined>(undefined)
+  const performanceTimerRef = useRef<number | undefined>(undefined)
 
   // Performance tracking
   const requestStartTimeRef = useRef<number>(0)
   const connectionStartTimeRef = useRef<number>(0)
   const metricsHistoryRef = useRef<PerformanceMetrics[]>([])
 
+  // Resolve WebSocket URL
+  const resolveWebSocketUrl = useCallback((): string => {
+    const envUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL
+    if (envUrl && envUrl.trim().length > 0) {
+      // Allow http(s) forms and convert to ws(s)
+      const normalized = envUrl.replace(/^http/i, "ws")
+      return normalized
+    }
+
+    // Fallbacks: prefer localhost for dev
+    if (typeof window !== "undefined") {
+      const isHttps = window.location.protocol === "https:"
+      // If the server is reverse-proxied on same host, use same host; otherwise default to localhost:3001
+      const sameHostUrl = `${isHttps ? "wss" : "ws"}://${window.location.hostname}${window.location.port ? `:${window.location.port}` : ""}/voice`
+      // Heuristic: in development (localhost:3000) connect to :3001
+      if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+        return `${isHttps ? "wss" : "ws"}://localhost:3001/voice`
+      }
+      return sameHostUrl
+    }
+
+    return "ws://localhost:3001/voice"
+  }, [])
+
   // Initialize WebSocket connection with performance monitoring
   const connectToServer = useCallback(() => {
     setConnectionStatus("connecting")
     connectionStartTimeRef.current = performance.now()
 
-    const ws = new WebSocket("ws://localhost:3001/voice")
+    const wsUrl = resolveWebSocketUrl()
+    const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -94,7 +119,7 @@ export default function VoiceChat() {
       setConnectionStatus("disconnected")
       updatePerformanceMetrics({ connectionStability: 0, packetsLost: performanceMetrics.packetsLost + 1 })
     }
-  }, [performanceMetrics.packetsLost])
+  }, [performanceMetrics.packetsLost, resolveWebSocketUrl])
 
   // Handle server messages
   const handleServerMessage = useCallback((message: any) => {
